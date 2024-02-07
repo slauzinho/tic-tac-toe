@@ -193,9 +193,8 @@ func (g *Game) CheckWin() bool {
 }
 
 
-// Implement other game methods: MakeMove, CheckWin, etc.
 
-var game = NewGame() // Global game instance
+var game = NewGame() 
 
 func playGame(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
