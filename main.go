@@ -166,10 +166,32 @@ func (g *Game) MakeMove(move Move, conn *websocket.Conn) {
 }
 
 func (g *Game) CheckWin() bool {
-	return (g.Board[0][0] == g.Board[0][1] && g.Board[0][1] == g.Board[0][2] && g.Board[0][0] != "" ||
-		g.Board[1][0] == g.Board[1][1] && g.Board[1][1] == g.Board[1][2] && g.Board[1][0] != "" ||
-		g.Board[2][0] == g.Board[2][1] && g.Board[2][1] == g.Board[2][2] && g.Board[2][0] != "")
+    // Check rows
+    for row := 0; row < 3; row++ {
+        if g.Board[row][0] == g.Board[row][1] && g.Board[row][1] == g.Board[row][2] && g.Board[row][0] != "" {
+            return true
+        }
+    }
+
+    // Check columns
+    for col := 0; col < 3; col++ {
+        if g.Board[0][col] == g.Board[1][col] && g.Board[1][col] == g.Board[2][col] && g.Board[0][col] != "" {
+            return true
+        }
+    }
+
+    // Check diagonals
+    if g.Board[0][0] == g.Board[1][1] && g.Board[1][1] == g.Board[2][2] && g.Board[0][0] != "" {
+        return true
+    }
+    if g.Board[0][2] == g.Board[1][1] && g.Board[1][1] == g.Board[2][0] && g.Board[0][2] != "" {
+        return true
+    }
+
+    // No winner found
+    return false
 }
+
 
 // Implement other game methods: MakeMove, CheckWin, etc.
 
