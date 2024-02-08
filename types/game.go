@@ -36,6 +36,7 @@ func (g *Game) HandleDisconnection(disconnectedPlayer *Player) {
 func (g *Game) AddPlayer(conn *websocket.Conn) {
 	player := &Player{Conn: conn, Game: g}
 	player.setupCloseHandler(g)
+
 	if g.Player1 == nil {
 		g.Player1 = player
 		g.Player1.Mark = "X"
@@ -43,7 +44,12 @@ func (g *Game) AddPlayer(conn *websocket.Conn) {
 		g.Player2 = player
 		g.Player2.Mark = "O"
 		g.Current = g.Player1
-		g.Status = "started"
+
+	}
+
+	if g.Player1 != nil && g.Player2 != nil {
+		g.ResetGame()
+		return
 	}
 
 	player.NotifyPlayer("You have joined the game")

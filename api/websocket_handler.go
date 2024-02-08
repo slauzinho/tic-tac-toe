@@ -40,10 +40,6 @@ func PlayGame(w http.ResponseWriter, r *http.Request) {
 
 	game.AddPlayer(conn)
 
-	if game.Status == "started" {
-		game.NotifyPlayersGameStarted()
-	}
-
 	for {
 		_, message, err := conn.ReadMessage()
 		if err != nil {
