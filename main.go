@@ -8,7 +8,6 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
@@ -28,16 +27,26 @@ type Message struct {
 }
 
 type Game struct {
-	Board   [3][3]string
-	Player1 *Player
-	Player2 *Player
-	Current *Player
-	Status  string
+	Board   [3][3]string `json:"board"`
+	Player1 *Player      `json:"player1"`
+	Player2 *Player      `json:"player2"`
+	Current *Player      `json:"current"`
+	Winner  string       `json:"winner"` // "X", "O" or "draw"
+	Status  string       `json:"status"` // started, waiting, ended
 }
 
 type Player struct {
-	Conn *websocket.Conn
-	Mark string // Player mark: "X" or "O"
+	Conn *websocket.Conn `json:"-"`
+	Mark string          `json:"mark"` // Player mark: "X" or "O"
+}
+
+func (p *Player) setupCloseHandler(game *Game) {
+	p.Conn.SetCloseHandler(func(code int, text string) error {
+		// Handle player disconnection here
+		log.Printf("Player disconnected: %v", p)
+		game.HandleDisconnection(p)
+		return nil
+	})
 }
 
 func NewGame() *Game {
@@ -49,6 +58,7 @@ func NewGame() *Game {
 // AddPlayer adds a player to the game
 func (g *Game) AddPlayer(conn *websocket.Conn) {
 	player := &Player{Conn: conn}
+	player.setupCloseHandler(g)
 	if g.Player1 == nil {
 		g.Player1 = player
 		g.Player1.Mark = "X"
@@ -59,62 +69,85 @@ func (g *Game) AddPlayer(conn *websocket.Conn) {
 		g.Status = "started"
 	}
 
+	g.notifyPlayer(player, "Waiting for opponent to join")
+}
+
+func (g *Game) HandleDisconnection(disconnectedPlayer *Player) {
+	g.Status = "waiting"
+
+	log.Println(g.Player1 == disconnectedPlayer)
+
+	if g.Player1 == disconnectedPlayer {
+		g.Player1 = nil
+		g.notifyPlayer(g.Player2, "Your opponent has disconnected")
+	} else if g.Player2 == disconnectedPlayer {
+		g.Player2 = nil
+		g.notifyPlayer(g.Player1, "Your opponent has disconnected")
+	}
 }
 
 func (g *Game) notifyPlayersGameStarted() {
-	type GameStartedData struct {
-		Board [3][3]string `json:"board"`
-	}
+	players := []*Player{g.Player1, g.Player2}
 
-	data := GameStartedData{
-		Board: g.Board,
+	for _, player := range players {
+		data := struct {
+			Game *Game  `json:"game"`
+			Mark string `json:"mark"`
+		}{
+			Game: g,
+			Mark: player.Mark,
+		}
+
+		message := Message{
+			Type: "gameStarted",
+			Data: data,
+		}
+
+		g.sendMessageToPlayer(player, message)
 	}
-	message := Message{
-		Type: "gameStarted",
-		Data: data,
-	}
-	g.sendMessageToPlayer(g.Player1, message)
-	g.sendMessageToPlayer(g.Player2, message)
 }
 
 func (g *Game) notifyPlayerTurn() {
-
-	type PlayerTurnData struct {
-		Board [3][3]string `json:"board"`
-		Turn  string       `json:"turn"`
-	}
-
-	data := PlayerTurnData{
-		Board: g.Board,
-	}
-
-	if g.Current == g.Player1 {
-		data.Turn = g.Player1.Mark
-	} else {
-		data.Turn = g.Player2.Mark
+	data := struct {
+		Game *Game `json:"game"`
+	}{
+		Game: g,
 	}
 
 	message := Message{
 		Type: "playerTurn",
-		Data: g.Board,
+		Data: data,
 	}
 
 	g.sendMessageToPlayer(g.Player1, message)
 	g.sendMessageToPlayer(g.Player2, message)
 }
 
-func (g *Game) notifyPlayerWon() {
-	type PlayerWonData struct {
-		Board  [3][3]string `json:"board"`
-		Winner string       `json:"winner"`
+func (g *Game) notifyPlayer(player *Player, message string) {
+	data := struct {
+		Message string `json:"message"`
+		Game    *Game  `json:"game"`
+	}{
+		Message: message,
+		Game:    g,
 	}
 
-	data := PlayerWonData{
-		Board:  g.Board,
-		Winner: g.Current.Mark,
+	msg := Message{
+		Type: "notification",
+		Data: data,
+	}
+
+	g.sendMessageToPlayer(player, msg)
+}
+
+func (g *Game) notifyPlayerGameEnded() {
+	data := struct {
+		Game *Game `json:"game"`
+	}{
+		Game: g,
 	}
 	message := Message{
-		Type: "playerWon",
+		Type: "gameEnded",
 		Data: data,
 	}
 
@@ -152,7 +185,21 @@ func (g *Game) MakeMove(move Move, conn *websocket.Conn) {
 	hasWon := g.CheckWin()
 
 	if hasWon {
-		g.notifyPlayerWon()
+		g.Status = "ended"
+		g.Winner = player.Mark
+		g.notifyPlayerGameEnded()
+		g.Current = nil
+
+		return
+	}
+
+	if g.CheckDraw() {
+		g.Status = "ended"
+		g.Winner = "draw"
+		g.notifyPlayerGameEnded()
+		g.Current = nil
+
+		return
 	}
 
 	if g.Current == g.Player1 {
@@ -162,39 +209,47 @@ func (g *Game) MakeMove(move Move, conn *websocket.Conn) {
 	}
 
 	g.notifyPlayerTurn()
-
 }
 
 func (g *Game) CheckWin() bool {
-    // Check rows
-    for row := 0; row < 3; row++ {
-        if g.Board[row][0] == g.Board[row][1] && g.Board[row][1] == g.Board[row][2] && g.Board[row][0] != "" {
-            return true
-        }
-    }
+	// Check rows
+	for row := 0; row < 3; row++ {
+		if g.Board[row][0] == g.Board[row][1] && g.Board[row][1] == g.Board[row][2] && g.Board[row][0] != "" {
+			return true
+		}
+	}
 
-    // Check columns
-    for col := 0; col < 3; col++ {
-        if g.Board[0][col] == g.Board[1][col] && g.Board[1][col] == g.Board[2][col] && g.Board[0][col] != "" {
-            return true
-        }
-    }
+	// Check columns
+	for col := 0; col < 3; col++ {
+		if g.Board[0][col] == g.Board[1][col] && g.Board[1][col] == g.Board[2][col] && g.Board[0][col] != "" {
+			return true
+		}
+	}
 
-    // Check diagonals
-    if g.Board[0][0] == g.Board[1][1] && g.Board[1][1] == g.Board[2][2] && g.Board[0][0] != "" {
-        return true
-    }
-    if g.Board[0][2] == g.Board[1][1] && g.Board[1][1] == g.Board[2][0] && g.Board[0][2] != "" {
-        return true
-    }
+	// Check diagonals
+	if g.Board[0][0] == g.Board[1][1] && g.Board[1][1] == g.Board[2][2] && g.Board[0][0] != "" {
+		return true
+	}
+	if g.Board[0][2] == g.Board[1][1] && g.Board[1][1] == g.Board[2][0] && g.Board[0][2] != "" {
+		return true
+	}
 
-    // No winner found
-    return false
+	// No winner found
+	return false
 }
 
+func (g *Game) CheckDraw() bool {
+	for row := 0; row < 3; row++ {
+		for col := 0; col < 3; col++ {
+			if g.Board[row][col] == "" {
+				return false
+			}
+		}
+	}
+	return true
+}
 
-
-var game = NewGame() 
+var game = NewGame()
 
 func playGame(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
@@ -203,6 +258,11 @@ func playGame(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer conn.Close()
+
+	if game.Player1 != nil && game.Player2 != nil {
+		log.Println("Game is full")
+		return
+	}
 
 	game.AddPlayer(conn)
 
@@ -226,8 +286,12 @@ func playGame(w http.ResponseWriter, r *http.Request) {
 		switch msg.Type {
 		case "move":
 
-			moveData, err := json.Marshal(msg.Data)
+			if game.Status == "ended" {
+				log.Println("Game has ended")
+				continue
+			}
 
+			moveData, err := json.Marshal(msg.Data)
 			if err != nil {
 				log.Println("error marshalling move data:", err)
 				break
