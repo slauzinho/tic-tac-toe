@@ -2,6 +2,7 @@ package types
 
 import (
 	"log"
+	"math/rand"
 
 	"github.com/gorilla/websocket"
 )
@@ -17,6 +18,9 @@ type Game struct {
 
 func (g *Game) HandleDisconnection(disconnectedPlayer *Player) {
 	g.Status = "waiting"
+	g.Board = [3][3]string{}
+	g.Winner = ""
+	g.Current = nil
 
 	log.Println(g.Player1 == disconnectedPlayer)
 
@@ -43,6 +47,25 @@ func (g *Game) AddPlayer(conn *websocket.Conn) {
 	}
 
 	player.NotifyPlayer("You have joined the game")
+}
+
+func (g *Game) ResetGame() {
+	g.Board = [3][3]string{}
+	g.Status = "waiting"
+	g.Winner = ""
+	g.Current = nil
+
+	if g.Player1 != nil && g.Player2 != nil {
+		g.Status = "started"
+		// pick a random player to start
+		if rand.Intn(2) == 0 {
+			g.Current = g.Player1
+		} else {
+			g.Current = g.Player2
+		}
+
+		g.NotifyPlayersGameStarted()
+	}
 }
 
 func (g *Game) SendMessageToPlayers(message Message) {

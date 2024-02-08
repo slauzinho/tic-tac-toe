@@ -81,6 +81,11 @@ func PlayGame(w http.ResponseWriter, r *http.Request) {
 
 			game.MakeMove(move, conn)
 
+		case "playAgain":
+			if game.Winner != "" {
+				game.ResetGame()
+			}
+
 		default:
 			log.Println("unknown message type:", msg.Type)
 		}
